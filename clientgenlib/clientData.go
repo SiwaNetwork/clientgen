@@ -100,6 +100,14 @@ type GlobalStatistics struct {
 
 	TotalDelayReqSent  uint64
 	TotalDelayRespRcvd uint64
+	
+	// PF_RING statistics
+	PFRingRXPackets      uint64
+	PFRingRXBytes        uint64
+	PFRingRXDropped      uint64
+	PFRingTXPackets      uint64
+	PFRingTXBytes        uint64
+	PFRingHWTimestamps   uint64
 }
 
 type ClientGenConfig struct {

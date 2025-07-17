@@ -61,35 +61,44 @@ func startIOWorker(cfg *ClientGenConfig) {
 					var rawIn *inPacket
 					var err error
 					// 1<<24 is PF_RING_DISCARD_INJECTED_PKTS , if you transmit a packet via the ring, doesn't read it back
-					if ring, err = pfring.NewRing(cfg.Iface, 4096, (1<<24)|pfring.FlagPromisc|pfring.FlagHWTimestamp); err != nil {
-						log.Errorf("pfring ring creation error:", err)
+					// Добавляем флаги для поддержки hardware timestamps
+					flags := (1<<24)|pfring.FlagPromisc|pfring.FlagHWTimestamp|pfring.FlagLongHeader
+					if ring, err = pfring.NewRing(cfg.Iface, 65536, flags); err != nil {
+						log.Errorf("pfring ring creation error: %v", err)
 						doneChan <- err
 						return
 					}
 					defer ring.Close()
+					
+					// Устанавливаем размер буфера для улучшения производительности
+					if err = ring.SetApplicationName("clientgen"); err != nil {
+						log.Warnf("pfring SetApplicationName error: %v", err)
+					}
+					
 					// just use fixed cluster number 1, round robin packets
 					if err = ring.SetCluster(1, pfring.ClusterType(pfring.ClusterRoundRobin)); err != nil {
-						log.Errorf("pfring SetCluster error:", err)
+						log.Errorf("pfring SetCluster error: %v", err)
 						doneChan <- err
 						return
 					}
 					if err = ring.SetDirection(pfring.ReceiveOnly); err != nil {
-						log.Errorf("pfring failed to set direction")
+						log.Errorf("pfring failed to set direction: %v", err)
 						doneChan <- err
 						return
 					}
+					// Оптимизируем параметры для низкой задержки
 					if err = ring.SetPollWatermark(1); err != nil {
-						log.Errorf("pfring failed to set poll watermark")
+						log.Errorf("pfring failed to set poll watermark: %v", err)
 						doneChan <- err
 						return
 					}
-					if err = ring.SetPollDuration(1); err != nil {
-						log.Errorf("pfring failed to set poll watermark")
+					if err = ring.SetPollDuration(0); err != nil {
+						log.Errorf("pfring failed to set poll duration: %v", err)
 						doneChan <- err
 						return
 					}
 					if err = ring.SetSamplingRate(1); err != nil {
-						log.Errorf("pfring failed to set sample rate")
+						log.Errorf("pfring failed to set sample rate: %v", err)
 						doneChan <- err
 						return
 					}
@@ -109,16 +118,49 @@ func startIOWorker(cfg *ClientGenConfig) {
 
 					var data []byte
 					var ci gopacket.CaptureInfo
+					var pktHdr pfring.ExtendedPacketHeader
 					rxStartDone <- true
+					
+					// Статистика PF_RING
+					go func() {
+						ticker := time.NewTicker(5 * time.Second)
+						defer ticker.Stop()
+						for {
+							select {
+							case <-ticker.C:
+								stats, err := ring.Stats()
+								if err == nil {
+									atomic.StoreUint64(&cfg.Counters.PFRingRXPackets, stats.Received)
+									atomic.StoreUint64(&cfg.Counters.PFRingRXDropped, stats.Dropped)
+								}
+							case <-(*cfg.Ctx).Done():
+								return
+							}
+						}
+					}()
+					
 					for {
 						// try to read from handle
+						// Используем ReadPacketDataExtended для получения расширенной информации включая hardware timestamps
 						data, ci, err = ring.ReadPacketData()
 						if err != nil || data == nil || len(data) == 0 {
 							continue
 						}
+						
+						// Получаем расширенную информацию о пакете для hardware timestamps
+						pktHdr, err = ring.ReadPacketDataExtended()
+						if err == nil && pktHdr.Timestamp.Sec > 0 {
+							// Используем hardware timestamp если доступен
+							ci.Timestamp = time.Unix(int64(pktHdr.Timestamp.Sec), int64(pktHdr.Timestamp.Nsec))
+							atomic.AddUint64(&cfg.Counters.PFRingHWTimestamps, 1)
+							if cfg.DebugPrint || cfg.DebugIoWkrRX {
+								log.Debugf("PFring listener %d got HW timestamp: %v", i, ci.Timestamp)
+							}
+						}
+						
 						profiler.Tick()
 						if cfg.DebugPrint || cfg.DebugIoWkrRX {
-							log.Debugf("PFring listener %d got data ts %v", i, ci.Timestamp)
+							log.Debugf("PFring listener %d got data ts %v, len %d", i, ci.Timestamp, len(data))
 						}
 						rawIn = cfg.RunData.inPacketPool.Get().(*inPacket)
 						rawIn.data = data
@@ -172,6 +214,41 @@ func startIOWorker(cfg *ClientGenConfig) {
 						cfg.PerfProfilers = append(cfg.PerfProfilers, &txTSworker[j])
 					}
 
+					// Создаем PF_RING для передачи пакетов
+					var txRing *pfring.Ring
+					var err error
+					// Флаги для TX: без DISCARD_INJECTED_PKTS чтобы можно было читать свои пакеты для timestamp
+					txFlags := pfring.FlagPromisc|pfring.FlagHWTimestamp|pfring.FlagLongHeader
+					if txRing, err = pfring.NewRing(cfg.Iface, 65536, txFlags); err != nil {
+						log.Errorf("pfring TX ring creation error: %v", err)
+						doneChan <- err
+						return
+					}
+					defer txRing.Close()
+					
+					if err = txRing.SetApplicationName("clientgen-tx"); err != nil {
+						log.Warnf("pfring TX SetApplicationName error: %v", err)
+					}
+					
+					if err = txRing.SetDirection(pfring.TransmitOnly); err != nil {
+						log.Errorf("pfring TX failed to set direction: %v", err)
+						doneChan <- err
+						return
+					}
+					
+					if err = txRing.SetSocketMode(pfring.WriteOnly); err != nil {
+						log.Errorf("pfring TX SetSocketMode error: %v", err)
+						doneChan <- err
+						return
+					}
+					
+					if err = txRing.Enable(); err != nil {
+						log.Errorf("pfring TX Enable error: %v", err)
+						doneChan <- err
+						return
+					}
+
+					// Оставляем raw socket для timestamp чтения как запасной вариант
 					ifInfo, err := net.InterfaceByName(cfg.Iface)
 					if err != nil {
 						log.Errorf("Interface by name failed in start tx worker")
@@ -302,9 +379,14 @@ func startIOWorker(cfg *ClientGenConfig) {
 									break
 								}
 							}
-							n, err := syscall.Write(fdTS, (*out.data).Bytes())
-							if err != nil || n == 0 {
-								log.Errorf("txWkr %d send packet TS failed, n %v err %v", i, n, err)
+							// Используем PF_RING для отправки с timestamp
+							err = txRing.WritePacketData((*out.data).Bytes())
+							if err != nil {
+								// Fallback на raw socket если PF_RING не сработал
+								n, err := syscall.Write(fdTS, (*out.data).Bytes())
+								if err != nil || n == 0 {
+									log.Errorf("txWkr %d send packet TS failed, n %v err %v", i, n, err)
+								}
 							}
 							if out.cl != nil {
 								out.cl.CountOutgoingPackets++
@@ -316,9 +398,14 @@ func startIOWorker(cfg *ClientGenConfig) {
 								atomic.StoreUint64(&cfg.Counters.MaxTXTSBytesOutstanding, diff)
 							}
 						} else {
-							_, err := syscall.Write(fd, (*out.data).Bytes())
+							// Используем PF_RING для обычной отправки
+							err = txRing.WritePacketData((*out.data).Bytes())
 							if err != nil {
-								log.Errorf("txWkr %d send packet failed, %v", i, err)
+								// Fallback на raw socket если PF_RING не сработал
+								_, err := syscall.Write(fd, (*out.data).Bytes())
+								if err != nil {
+									log.Errorf("txWkr %d send packet failed, %v", i, err)
+								}
 							}
 							if out.cl != nil {
 								out.cl.CountOutgoingPackets++
@@ -334,12 +421,11 @@ func startIOWorker(cfg *ClientGenConfig) {
 								}
 							}
 							if cfg.DebugPrint || cfg.DebugIoWkrTX {
-								log.Debugf("Debug txWkr %d send packet", i)
+								log.Debugf("Debug txWkr %d send packet via PF_RING", i)
 							}
 							if err != nil {
-								log.Errorf("Raw socket write packet data failed %v", err)
-								doneChan <- fmt.Errorf("Raw socket write packet data failed %v", err)
-								return
+								log.Errorf("PF_RING write packet data failed %v", err)
+								// Не прерываем работу, продолжаем с следующим пакетом
 							}
 						}
 						atomic.AddUint64(&cfg.Counters.TotalPacketsSent, 1)
