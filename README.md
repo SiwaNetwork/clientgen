@@ -1,76 +1,75 @@
 # Clientgen
-An open source stateful PTP client traffic generator based on PF_RING and simpleclient example. 
+Генератор трафика PTP клиентов с открытым исходным кодом, основанный на PF_RING и примере simpleclient.
 
-## Operation details
+## Детали работы
 
-This utility is designed to simulate large number of PTP clients that go through the following sequence
-1. Request Sync Unicast Grant for a specified duration
-2. Request Announce Unicast Grant for a specified duration
-3. Request Delay Response Unicast Grant for a specified duration
-4. Periodically send DelayResp requests to the server while the Grants are active
-5. Potentially restart after all the Grants have expired
+Эта утилита предназначена для симуляции большого количества PTP клиентов, которые проходят через следующую последовательность:
+1. Запрос Sync Unicast Grant на указанную продолжительность
+2. Запрос Announce Unicast Grant на указанную продолжительность
+3. Запрос Delay Response Unicast Grant на указанную продолжительность
+4. Периодическая отправка запросов DelayResp на сервер, пока Grants активны
+5. Потенциальный перезапуск после истечения всех Grants
 
-### Configuration
-The utility is configured through a single json configuration file, detailed below, clientgen_config.json
-* The clients are specified by IP address start, IP address end, and IP address step size, similar to commercial traffic generators
+### Конфигурация
+Утилита настраивается через единый конфигурационный файл json, подробно описанный ниже, clientgen_config.json
+* Клиенты указываются начальным IP-адресом, конечным IP-адресом и размером шага IP-адреса, аналогично коммерческим генераторам трафика
 
-### Operation
+### Работа
 
-The utility runs via CLI , and provides printed output periodically (period specified in config) with detailed output, configurable based on the config.
-* An example of the CLI output is below. Each section printed can be disabled if desired in the config.
+Утилита запускается через CLI и периодически выводит подробную информацию (период указывается в конфигурации), настраиваемую на основе конфигурации.
+* Пример вывода CLI приведен ниже. Каждая выводимая секция может быть отключена при желании в конфигурации.
 
-### Incoming packets
-The utility is based on pipelining incoming packets in the following manner:
-1. RX ioWkr: Read an incoming packet from PF_RING buffer (including RX timestamp), pass it to packetParser
-2. packetParser: Parse the incoming packet using gopacket to decode the packet layers, pass it to packetProcessor
-3. packetProcessor: 
-   * If packet is ARP (for IPv4) or ICMPv6 (for IPv6), craft a response based on client configuration. Pass response to txWkr
-   * if packet is UDP , look into the UDP packet to figure out if it's for a simulated client and craft a response if needed. Pass response to txWkr.
-   * If packet was from TX path (see below) , then this packet is just used to figure out where to store the timestamp that came with it (TX timestamp)
+### Входящие пакеты
+Утилита основана на конвейерной обработке входящих пакетов следующим образом:
+1. RX ioWkr: Чтение входящего пакета из буфера PF_RING (включая RX timestamp), передача его в packetParser
+2. packetParser: Парсинг входящего пакета с использованием gopacket для декодирования слоев пакета, передача в packetProcessor
+3. packetProcessor:
+   * Если пакет ARP (для IPv4) или ICMPv6 (для IPv6), создание ответа на основе конфигурации клиента. Передача ответа в txWkr
+   * Если пакет UDP, проверка UDP пакета для определения, предназначен ли он для симулируемого клиента, и создание ответа при необходимости. Передача ответа в txWkr.
+   * Если пакет был из TX пути (см. ниже), то этот пакет используется только для определения места хранения timestamp, который пришел с ним (TX timestamp)
 
+Утилита работает, используя низкоуровневое создание пакетов и захват пакетов для контроля каждого отдельного отправленного пакета и обработки каждого полученного пакета.
+* Поскольку каждый пакет создается вручную, утилита требует предварительного знания MAC-адреса DUT в конфигурационном файле
+* Утилита также требует имя интерфейса, например ens1f0, в конфигурационном файле для привязки сокетов и библиотеки pcap
+* PF_RING используется для приема пакетов.
+  * Он позволяет распределять все входящие пакеты на интерфейсе по принципу round-robin между произвольным количеством рабочих goroutines
+  * Он позволяет использовать гораздо большую буферизацию пакетов, буферизируя пакеты в памяти CPU, а не в буферных пространствах NIC
+  * Он убирает опрос NIC из пользовательского пространства, вместо этого напрямую опрашивая NIC в ядре и буферизируя пакеты в буферах пользовательского пространства
 
-The utility works using low level packet crafting and packet capture to control each individual packet sent and handle each packet received.
-* Because each packet is crafted, the utility requires pre-knowledge about the DUT MAC address in the config file
-* The utility also requires the name of the interface, like ens1f0, in the config file to bind the sockets and pcap library to
-* PF_RING is used for packet ingress. 
-  * It allows all incoming packets on an interface to be round-robin distributed to an arbitrary number of worker goroutines
-  * It allows for much larger packet buffering, buffering packets in the CPU memory rather than NIC buffer spaces
-  * It removes polling the NIC from the user space, instead directly polling the NIC in the kernel and buffering them packets in user space buffers
+### Исходящие пакеты
+Утилита имеет txWkrs для обработки отправки пакетов:
+* Каждый пакет, отправленный в txWkr, имеет флаг, указывающий, требуется ли его timestamping или нет
+* Если timestamping не требуется, пакет отправляется с простым сокетом
+* Если timestamping требуется, пакет отправляется на сокет с включенным timestamping.
+* Каждый txWkr имеет несколько goroutines, которые опрашивают свой включенный в timestamping сокет, чтобы как можно скорее извлечь TX timestamps
+* Для каждого TX timestamp, полный пакет, отправленный, также читается назад. Этот пакет передается в packetParser с флагом, указывающим, что это был отправленный пакет
 
-### Outgoing packets
-The utility has txWkrs to handle sending packets:
-* Each packet sent to the txWkr has a flag if it needs timestamping or not
-* If timestamping is not required, the packet is sent with a simple socket
-* If timestamping is required, the packet is sent on a socket with timestamping enabled.
-* Each txWkr has multiple goroutines polling its timestamped enabled socket to pull TX timestamps as soon as possible
-* For each TX timestamp, the full packet sent is also read back. This packet is passed to packetParser with a flag indicating it was a sent packet
+### Обработка клиентов
+Утилита имеет retransmitWorkers для обработки повторных передач пакетов:
+* Каждый retransmitWorker поддерживает кучу на основе времени для указания, когда клиент должен быть повторно передан, если ответа не было.
+* Каждый элемент кучи связан с определенным клиентом.
+* Эта куча используется для повторной передачи grants. Например, если клиент не получил Sync Grant от сервера в течение времени, этот процессор повторно передаст Sync Grant Request
+* Он также используется для повторной передачи, если это необходимо. Например, когда клиент имеет все grants, он используется для периодической отправки DelayReq.
 
-### Client processing 
-The utility has retransmitWorkers to handle retransmitting packets:
-* Each retransmitWorker maintains a heap based on time to specify when a client should be retransmitted if no response came in.
-* Each heap item is associated with a particular client.
-* This heap is used to retransmit grants. For example, if a client did not get Sync Grant from the server within a time, this processor will retransmit Sync Grant Request
-* It's also used to retransmit if needed. For example, when a client has all the grants, it is used to send DelayReq periodically.
+Утилита имеет restartWorkers для обработки перезапусков клиентов:
+* Каждый restartWorker поддерживает кучу на основе времени, если перезапуск включен в конфигурации
+* Когда клиент получает все три grants от сервера, он помещает себя в кучу для перезапуска после истечения всех grants.
 
-The utility has restartWorkers to handle restarting clients:
-* Each restartWorker maintains a heap based on time if restart is enabled in the config
-* When a client receives all three grants from the server, it pushes itself onto the heap to restart after all grants have expired.
-
-## Installation guide
+## Руководство по установке
 
 ### PF_RING
-1. Download and install pf_ring from ntop.org
+1. Скачайте и установите pf_ring из ntop.org
 ```console
 git clone https://github.com/ntop/PF_RING.git
 ```
-2. Build the pf_ring kernel module
+2. Соберите ядро модуля pf_ring
 ```console
 cd PF_RING/kernel
 make 
 sudo make install
 insmod ./pf_ring.ko
 ```
-3. Build and install the API libraries for pf_ring
+3. Соберите и установите API библиотеки для pf_ring
 ```console
 cd PF_RING/userland/lib
 ./configure && make
@@ -79,7 +78,7 @@ cd ../libpcap
 ./configure && make
 sudo make install
 ```
-More details can be found here
+Подробнее можно найти здесь
 	* https://www.ntop.org/guides/pf_ring/get_started/git_installation.html
 
 ### Pull clientgen
@@ -88,62 +87,62 @@ git clone https://github.com/opencomputeproject/Time-Appliance-Project
 ```
 
 ### Build clientgen
-1. Be sure to link LDD to where the pf_ring libraries are
+1. Убедитесь, что LDD связан с тем, где библиотеки pf_ring находятся
 ```console
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/
 ```
-2. Be sure to provide path to pf_ring header file. Change this path to where PF_RING was built.
+2. Убедитесь, что путь к заголовочному файлу pf_ring. Измените этот путь на тот, где PF_RING был собран.
 ```console
 C_INCLUDE_PATH=~/ptp/PF_RING/kernel; export C_INCLUDE_PATH
 ```
-3. Go to clientgen directory and build
+3. Перейдите в директорию clientgen и соберите
 ```console
 cd Software/Experimental/clientgen/
 go build
 ```
 
-## Usage guide
-Clientgen is configured by a json config file, clientgen_config.json, in the same directory as the executable. Run it by running Clientgen in the clientgen directory. Change the json configuration prior to running to console the execution.
+## Руководство по использованию
+Clientgen настраивается конфигурационным файлом json, clientgen_config.json, в той же директории, что и исполняемый файл. Запустите его, запустив Clientgen в директории clientgen. Измените конфигурацию json перед запуском в консоль для выполнения.
 
 ```console
 cd clientgen/
 ./clientgen -config clientgen_config.json [-profilelog <cpuprofiler file>]
 ```
 
-Description of items in this json file:
+Описание элементов в этом json файле:
 ### Traffic and client configuration
-* "Iface" - the interface on the server to generate client traffic from, ex. "ens1f0"
-* "ServerMAC" - the MAC address of the PTP Grandmaster Server, ex. "0c:42:a1:80:31:66"
-* "ServerAddress" - the IPv4 or IPv6 address of the PTP Grandmaster Server, ex. "10.254.254.254"
-* "ClientIPStart" - IPv4 or IPv6. For the range of clients to generate, this is the IP address of the first client. ex. "10.1.1.2"
-* "ClientIPEnd" - IPv4 or IPv6. For the range of clients to generate, this is the last client IP. ex. "10.1.1.10"
-* "ClientIPStep" - For the clients to generate, how much to increment from ClientIPStart for each client. If ClientIPStart is 10.1.1.2 and this is 2, then it will generate clients 10.1.1.2 -> 10.1.1.4 -> 10.1.1.6 -> 10.1.1.8 etc. until ClientIPEnd
-* "SoftStartRate" - The maximum number of clients to start per second
-* "TimeoutSec" - how many seconds to run clientgen for, after which the program will stop generating traffic.
-* "DurationSec" - The Grant Duration each client tries to subscribe to the PTP grandmaster when asking for UDP Grants, like Sync/Announce/DelayResp.
-* "TimeAfterDurationBeforeRestartSec" - Time after a client's last grant expires to wait before restarting the client in seconds
-* "TimeBetweenDelayReqSec" - After a client has all its grants, how many DelayReqs to send per second
-* "ClientRetranTimeWhenNoResponseSec" - How many seconds a client should wait when requesting a grant before retransmitting the grant request if no response is received in seconds
+* "Iface" - интерфейс на сервере для генерации трафика клиентов, например "ens1f0"
+* "ServerMAC" - MAC-адрес PTP Grandmaster сервера, например "0c:42:a1:80:31:66"
+* "ServerAddress" - IPv4 или IPv6 адрес PTP Grandmaster сервера, например "10.254.254.254"
+* "ClientIPStart" - IPv4 или IPv6. Для диапазона клиентов, это IP-адрес первого клиента. Например "10.1.1.2"
+* "ClientIPEnd" - IPv4 или IPv6. Для диапазона клиентов, это последний IP-адрес клиента. Например "10.1.1.10"
+* "ClientIPStep" - Для генерации клиентов, насколько увеличивать ClientIPStart для каждого клиента. Если ClientIPStart равен 10.1.1.2, а это 2, то будут сгенерированы клиенты 10.1.1.2 -> 10.1.1.4 -> 10.1.1.6 -> 10.1.1.8 и т.д. до ClientIPEnd
+* "SoftStartRate" - Максимальное количество клиентов для запуска в секунду
+* "TimeoutSec" - сколько секунд запустить clientgen, после чего программа остановит генерацию трафика.
+* "DurationSec" - Продолжительность Grant каждого клиента при попытке подписаться на PTP grandmaster при запросе UDP Grants, например Sync/Announce/DelayResp.
+* "TimeAfterDurationBeforeRestartSec" - Время после истечения последнего grant клиента для ожидания перед перезапуском клиента в секундах
+* "TimeBetweenDelayReqSec" - После того, как клиент имеет все свои grants, сколько DelayReqs отправлять в секунду
+* "ClientRetranTimeWhenNoResponseSec" - Сколько секунд клиент должен ждать при запросе grant перед повторной передачей запроса grant, если ответа не получено в секундах
 ### Performance controls
-* "NumTXWorkers" - How many goroutines to spawn to handle transmitting packets. This may be the main bottleneck, due to TX Timestamping performance.
-* "NumTXTSWorkerPerTx" - How many goroutines to spawn per TX worker to read TX timestamps.
-* "NumRXWorkers" - How many goroutines to spawn to handle RX work. 
-* "NumPacketParsers" - How many goroutines to spawn to Parse each received packet into a gopacket format for internal use.
-* "NumPacketProcessors" - How many goroutines to spawn to handle each Parsed packet and possibly generate a response.
-* "NumClientRetransmitProcs" - How many goroutines to spawn to manage internal timers for possible retransmit for each client. Work per goroutine will scale with client count.
-* "NumClientRestartProcs" - How many goroutines to spawn to manage internal timers for restarting clients after their grants are over. Work per goroutine will scale with client count.
+* "NumTXWorkers" - Сколько goroutines запускать для обработки отправки пакетов. Это может быть главным узким местом, из-за производительности timestamping TX.
+* "NumTXTSWorkerPerTx" - Сколько goroutines запускать на TX worker для чтения TX timestamps.
+* "NumRXWorkers" - Сколько goroutines запускать для обработки RX работы. 
+* "NumPacketParsers" - Сколько goroutines запускать для парсинга каждого полученного пакета в формат gopacket для внутреннего использования.
+* "NumPacketProcessors" - Сколько goroutines запускать для обработки каждого парсированного пакета и возможной генерации ответа.
+* "NumClientRetransmitProcs" - Сколько goroutines запускать для управления внутренними таймерами для возможной повторной передачи для каждого клиента. Работа на goroutine будет масштабироваться с количеством клиентов.
+* "NumClientRestartProcs" - Сколько goroutines запускать для управления внутренними таймерами для перезапуска клиентов после истечения их grants. Работа на goroutine будет масштабироваться с количеством клиентов.
 ### Debug logging
-* Enable these only for development and debug purposes, should be left false in almost all cases.
-### Periodic statistics printing
-* "PrintPerformance" - Prints the percentage each worker goroutine is busy. Use this to help fine tune the Performance Controls above to get the desired performance.
-* "PrintClientData" - Prints information about all the clients, such as Total Announce Requests sent and Total Announce Grants received
-* "PrintTxRxCounts" - Prints simple TX and RX packet counters
-* "PrintClientReqData" - Prints histogram information for Announce Requests / Sync Requests / Delay Response Grant Requests / Delay Requests for all the clients
-* "PrintLatencyData" - Prints statistical information for the server latency when responding to Announce Requests / Sync Requests / Delay Response Grant Requests / Delay Requests , and statistical information on the time between Sync packets from the grandmaster.
-* "CounterPrintIntervalSecs" - How often to print the enabled statistics
+* Включайте только для разработки и отладки, должны быть выключены в большинстве случаев.
+### Периодическая печать статистики
+* "PrintPerformance" - Печатает процент занятости каждого рабочего goroutine. Используйте это, чтобы помочь настроить Performance Controls выше, чтобы получить желаемую производительность.
+* "PrintClientData" - Печатает информацию обо всех клиентах, например общее количество запросов Announce, общее количество полученных Announce Grants
+* "PrintTxRxCounts" - Печатает простые счетчики TX и RX пакетов
+* "PrintClientReqData" - Печатает гистограмму информации для Announce Requests / Sync Requests / Delay Response Grant Requests / Delay Requests для всех клиентов
+* "PrintLatencyData" - Печатает статистическую информацию о латентности сервера при ответе на Announce Requests / Sync Requests / Delay Response Grant Requests / Delay Requests , а также статистическую информацию о времени между Sync пакетами от grandmaster.
+* "CounterPrintIntervalSecs" - Сколько секунд печатать включенные статистики
 
-## Example CLI output
-When running with everything printing, this is an example of what the output statistics encompass.
+## Пример вывода CLI
+При запуске со всеми печатными, это пример того, что охватывают статистические данные.
 
 ```console
 ========================Statistics after 999.684ms============
