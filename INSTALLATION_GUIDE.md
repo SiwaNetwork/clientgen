@@ -287,10 +287,46 @@ Sync Grant Latency - Min: 0.8ms, Max: 4.1ms, Avg: 1.5ms
 
 ### Проблема: "pfring.h: No such file or directory"
 
-**Решение**: Установите PF_RING и укажите пути при сборке:
+**Решение**: Установите PF_RING следуя инструкциям:
+
+1. **Установка PF_RING**:
+```bash
+# Клонирование репозитория
+git clone https://github.com/ntop/PF_RING.git
+cd PF_RING
+
+# Компиляция kernel module
+cd kernel
+make
+sudo make install
+
+# Компиляция userspace библиотек
+cd ../userland/lib
+./configure
+make
+sudo make install
+
+# Компиляция libpcap с поддержкой PF_RING
+cd ../libpcap
+./configure
+make
+sudo make install
+
+# Загрузка модуля
+sudo modprobe pf_ring
+```
+
+2. **Настройка переменных окружения**:
 ```bash
 export CGO_CFLAGS="-I/usr/local/include"
-export CGO_LDFLAGS="-L/usr/local/lib -lpfring"
+export CGO_LDFLAGS="-L/usr/local/lib -lpfring -lpcap"
+export LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
+```
+
+3. **Проверка установки**:
+```bash
+# Запустите скрипт проверки
+./check_pfring.sh
 ```
 
 ### Проблема: "Permission denied"

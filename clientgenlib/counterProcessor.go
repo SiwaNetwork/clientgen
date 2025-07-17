@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jamiealquiza/tachymeter"
@@ -134,6 +135,13 @@ func startCounterProcessor(cfg *ClientGenConfig) {
 						fmt.Printf("RX worker %d pkt recv: %v\n",
 							i, cfg.perIORX[i])
 					}
+					
+					// PF_RING статистика
+					fmt.Printf("\n==PF_RING Statistics=========\n")
+					fmt.Printf("PF_RING RX packets: %v\n", atomic.LoadUint64(&cfg.Counters.PFRingRXPackets))
+					fmt.Printf("PF_RING RX dropped: %v\n", atomic.LoadUint64(&cfg.Counters.PFRingRXDropped))
+					fmt.Printf("PF_RING TX packets: %v\n", atomic.LoadUint64(&cfg.Counters.PFRingTXPackets))
+					fmt.Printf("PF_RING HW timestamps: %v\n", atomic.LoadUint64(&cfg.Counters.PFRingHWTimestamps))
 				}
 				prevData = data
 

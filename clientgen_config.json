@@ -37,7 +37,7 @@
 
 	"PrintPerformance" : true,
 	"PrintClientData" : true,
-	"PrintTxRxCounts" : false,
+	"PrintTxRxCounts" : true,
 	"PrintClientReqData" : false,
 	"PrintLatencyData" : true,
 	"CounterPrintIntervalSecs": 1
