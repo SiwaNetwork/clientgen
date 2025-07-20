@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClientGen - Веб-интерфейс</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">ClientGen</div>
+                <nav class="nav">
+                    <a href="#" class="nav-link active">Веб-интерфейс</a>
+                    <a href="https://github.com/facebook/time" target="_blank" class="nav-link">GitHub</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div class="container">
+            <div id="alert-container"></div>
+            
+            <div class="tabs">
+                <button class="tab-button active" data-tab="dashboard">🏠 Панель управления</button>
+                <button class="tab-button" data-tab="configuration">⚙️ Конфигурация</button>
+                <button class="tab-button" data-tab="statistics">📊 Статистика</button>
+                <button class="tab-button" data-tab="performance">📈 Производительность</button>
+            </div>
+
+            <!-- Dashboard Tab -->
+            <div id="dashboard" class="tab-content active">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Состояние системы</h2>
+                        <p class="card-description">Общий обзор работы генератора трафика PTP клиентов</p>
+                    </div>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="total-clients">0</div>
+                            <div class="stat-label">Всего клиентов</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="packets-sent">0</div>
+                            <div class="stat-label">Отправлено пакетов</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="packets-received">0</div>
+                            <div class="stat-label">Получено пакетов</div>
+                        </div>
+                        <div class="stat-card">
+                            <div id="system-status">
+                                <span class="status-indicator status-stopped">● Остановлен</span>
+                            </div>
+                            <div class="stat-label">Статус системы</div>
+                        </div>
+                    </div>
+
+                    <div class="text-center mt-4">
+                        <button id="toggle-system" class="btn btn-success">▶ Запустить</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Быстрая статистика PTP</h3>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="total-sync">0</div>
+                            <div class="stat-label">Sync сообщений</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="total-announce">0</div>
+                            <div class="stat-label">Announce сообщений</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="total-delay-req">0</div>
+                            <div class="stat-label">DelayReq отправлено</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="hw-timestamps">0</div>
+                            <div class="stat-label">Hardware Timestamps</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configuration Tab -->
+            <div id="configuration" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Конфигурация</h2>
+                        <p class="card-description">Настройка параметров генератора трафика</p>
+                    </div>
+
+                    <form id="config-form">
+                        <div class="form-grid">
+                            <!-- Network Configuration -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Сетевые настройки</h3>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label" for="Iface">Сетевой интерфейс</label>
+                                    <input type="text" class="form-input" name="Iface" placeholder="например, ens1f0np0">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="ServerMAC">MAC-адрес сервера</label>
+                                    <input type="text" class="form-input" name="ServerMAC" placeholder="00:00:00:00:00:00">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="ServerAddress">IP-адрес сервера</label>
+                                    <input type="text" class="form-input" name="ServerAddress" placeholder="192.168.1.1">
+                                </div>
+                            </div>
+
+                            <!-- Client Configuration -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Настройки клиентов</h3>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="ClientIPStart">Начальный IP клиента</label>
+                                    <input type="text" class="form-input" name="ClientIPStart" placeholder="192.168.1.100">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="ClientIPEnd">Конечный IP клиента</label>
+                                    <input type="text" class="form-input" name="ClientIPEnd" placeholder="192.168.1.200">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="ClientIPStep">Шаг IP-адреса</label>
+                                    <input type="number" class="form-input" name="ClientIPStep" min="1" value="1">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="SoftStartRate">Скорость запуска (клиентов/сек)</label>
+                                    <input type="number" class="form-input" name="SoftStartRate" min="1" value="1000000000000000">
+                                </div>
+                            </div>
+
+                            <!-- Timing Configuration -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Временные параметры</h3>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="TimeoutSec">Таймаут (сек)</label>
+                                    <input type="number" class="form-input" name="TimeoutSec" min="1" step="0.1" value="90">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="DurationSec">Длительность (сек)</label>
+                                    <input type="number" class="form-input" name="DurationSec" min="1" step="0.1" value="5">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="TimeBetweenDelayReqSec">Интервал DelayReq (сек)</label>
+                                    <input type="number" class="form-input" name="TimeBetweenDelayReqSec" min="0.1" step="0.1" value="1">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="ClientRetranTimeWhenNoResponseSec">Время повтора (сек)</label>
+                                    <input type="number" class="form-input" name="ClientRetranTimeWhenNoResponseSec" min="0.1" step="0.1" value="1">
+                                </div>
+                            </div>
+
+                            <!-- Worker Configuration -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Количество воркеров</h3>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="NumTXWorkers">TX воркеры</label>
+                                    <input type="number" class="form-input" name="NumTXWorkers" min="1" value="4">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="NumRXWorkers">RX воркеры</label>
+                                    <input type="number" class="form-input" name="NumRXWorkers" min="1" value="4">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="NumPacketParsers">Парсеры пакетов</label>
+                                    <input type="number" class="form-input" name="NumPacketParsers" min="1" value="4">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="NumPacketProcessors">Процессоры пакетов</label>
+                                    <input type="number" class="form-input" name="NumPacketProcessors" min="1" value="4">
+                                </div>
+                            </div>
+
+                            <!-- Debug Options -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Отладка и вывод</h3>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-checkbox">
+                                        <input type="checkbox" name="DebugPrint">
+                                        Отладочный вывод
+                                    </label>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-checkbox">
+                                        <input type="checkbox" name="PrintPerformance">
+                                        Показать производительность
+                                    </label>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-checkbox">
+                                        <input type="checkbox" name="PrintClientData">
+                                        Показать данные клиентов
+                                    </label>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-checkbox">
+                                        <input type="checkbox" name="RestartClientsAfterDuration">
+                                        Перезапуск клиентов
+                                    </label>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="CounterPrintIntervalSecs">Интервал печати (сек)</label>
+                                    <input type="number" class="form-input" name="CounterPrintIntervalSecs" min="1" value="1">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="text-center mt-4">
+                            <button type="button" id="save-config" class="btn btn-primary">💾 Сохранить конфигурацию</button>
+                            <button type="button" id="export-config" class="btn btn-secondary">📤 Экспорт</button>
+                            <button type="button" id="import-config" class="btn btn-secondary">📥 Импорт</button>
+                            <input type="file" id="import-file" accept=".json" class="hidden">
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Statistics Tab -->
+            <div id="statistics" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Подробная статистика</h2>
+                        <p class="card-description">Детальная информация о работе системы</p>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="pfring-rx-packets">0</div>
+                            <div class="stat-label">PF_RING RX пакеты</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="pfring-tx-packets">0</div>
+                            <div class="stat-label">PF_RING TX пакеты</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="pfring-dropped">0</div>
+                            <div class="stat-label">Потерянные пакеты</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="hw-timestamps">0</div>
+                            <div class="stat-label">HW временные метки</div>
+                        </div>
+                    </div>
+
+                    <div class="text-center mt-3">
+                        <button id="clear-stats" class="btn btn-warning">🗑️ Очистить статистику</button>
+                    </div>
+                </div>
+
+                <!-- Detailed Statistics Tables -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">PTP сообщения</h3>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="total-sync-grant">0</div>
+                            <div class="stat-label">Sync Grant запросы</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="total-announce-grant">0</div>
+                            <div class="stat-label">Announce Grant запросы</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="total-delay-resp-grant">0</div>
+                            <div class="stat-label">DelayResp Grant запросы</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="total-follow-up">0</div>
+                            <div class="stat-label">FollowUp сообщения</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Performance Tab -->
+            <div id="performance" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Мониторинг производительности</h2>
+                        <p class="card-description">Графики производительности в реальном времени</p>
+                    </div>
+                    
+                    <div class="chart-container">
+                        <canvas id="performance-chart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Метрики системы</h3>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value">99.9%</div>
+                            <div class="stat-label">Доступность</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">< 1ms</div>
+                            <div class="stat-label">Средняя задержка</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">10Mpps</div>
+                            <div class="stat-label">Пиковая производительность</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">0.001%</div>
+                            <div class="stat-label">Потеря пакетов</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
