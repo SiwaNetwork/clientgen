@@ -2,6 +2,7 @@
 
 # Переменные
 BINARY_NAME = clientgen
+WEBSERVER_NAME = webserver
 GO = go
 GOFLAGS = -v
 
@@ -12,10 +13,9 @@ PFRING_LIB = /usr/local/lib
 # CGO флаги для PF_RING
 export CGO_CFLAGS = -I$(PFRING_INCLUDE)
 export CGO_LDFLAGS = -L$(PFRING_LIB) -lpfring -lpcap
-export LD_LIBRARY_PATH = $(PFRING_LIB):$(LD_LIBRARY_PATH)
 
 # Цели
-.PHONY: all build clean test install deps check-pfring
+.PHONY: all build build-web clean test install deps check-pfring web run-web
 
 all: build
 
@@ -33,6 +33,14 @@ deps:
 build: deps
 	@echo "Building $(BINARY_NAME)..."
 	$(GO) build $(GOFLAGS) -o $(BINARY_NAME) .
+
+# Сборка веб-сервера (без PF_RING зависимостей)
+build-web: deps
+	@echo "Building $(WEBSERVER_NAME)..."
+	env -u CGO_CFLAGS -u CGO_LDFLAGS $(GO) build $(GOFLAGS) -o $(WEBSERVER_NAME) webserver.go
+
+# Сборка обоих приложений
+web: build build-web
 
 # Сборка с оптимизациями
 build-release: deps
@@ -53,20 +61,27 @@ test:
 clean:
 	@echo "Cleaning..."
 	$(GO) clean
-	rm -f $(BINARY_NAME)
+	rm -f $(BINARY_NAME) $(WEBSERVER_NAME)
 
 # Запуск с конфигурацией по умолчанию
 run: build
 	sudo ./$(BINARY_NAME) -config clientgen_config.json
 
+# Запуск веб-сервера
+run-web: build-web
+	./$(WEBSERVER_NAME)
+
 # Помощь
 help:
 	@echo "Available targets:"
 	@echo "  make build         - Build the binary"
+	@echo "  make build-web     - Build the web server"
+	@echo "  make web           - Build both binary and web server"
 	@echo "  make build-release - Build optimized binary"
 	@echo "  make install       - Install binary with capabilities"
 	@echo "  make test          - Run tests"
 	@echo "  make clean         - Clean build artifacts"
 	@echo "  make check-pfring  - Check PF_RING installation"
 	@echo "  make run           - Build and run with default config"
+	@echo "  make run-web       - Build and run web server"
 	@echo "  make help          - Show this help"
